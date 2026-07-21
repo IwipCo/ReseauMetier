@@ -1,0 +1,46 @@
+{
+  "people": [
+    "Vous", "Camille Durand", "Yanis Belkacem", "Sofia Rossi", "Marc Lefevre",
+    "Aline Petit", "Karim Haddad", "Elise Moreau", "Thomas Nguyen", "Julie Bernard", "Hugo Simon"
+  ],
+  "visioLinks": [
+    { "id": 1, "url": "https://teams.microsoft.com/l/meetup-join/lien-permanent-1" },
+    { "id": 2, "url": "https://teams.microsoft.com/l/meetup-join/lien-permanent-2" },
+    { "id": 3, "url": "https://teams.microsoft.com/l/meetup-join/lien-permanent-3" },
+    { "id": 4, "url": "https://teams.microsoft.com/l/meetup-join/lien-permanent-4" },
+    { "id": 5, "url": "https://teams.microsoft.com/l/meetup-join/lien-permanent-5" },
+    { "id": 6, "url": "https://teams.microsoft.com/l/meetup-join/lien-permanent-6" },
+    { "id": 7, "url": "https://teams.microsoft.com/l/meetup-join/lien-permanent-7" },
+    { "id": 8, "url": "https://teams.microsoft.com/l/meetup-join/lien-permanent-8" },
+    { "id": 9, "url": "https://teams.microsoft.com/l/meetup-join/lien-permanent-9" },
+    { "id": 10, "url": "https://teams.microsoft.com/l/meetup-join/lien-permanent-10" }
+  ],
+  "events": [
+    { "id": "e1", "type": "lm", "status": "ferme", "title": "Introduction au Design Thinking", "description": "Un tour d'horizon des méthodes de co-création pour cadrer un besoin utilisateur en 2h.", "date": "2026-06-05", "startTime": "10:00", "duration": 120, "organizers": ["Camille Durand"], "linkId": 1, "tags": ["Méthodologie", "UX"], "registrations": ["Vous", "Yanis Belkacem", "Sofia Rossi"] },
+    { "id": "e2", "type": "lm", "status": "ferme", "title": "Bonnes pratiques Terraform", "description": "Retour d'expérience sur la structuration de modules Terraform à grande échelle.", "date": "2026-06-05", "startTime": "10:30", "duration": 90, "organizers": ["Marc Lefevre", "Karim Haddad"], "linkId": 2, "tags": ["Cloud", "DevOps"], "registrations": ["Aline Petit", "Thomas Nguyen"] },
+    { "id": "e3", "type": "lm", "status": "ouvert", "title": "Écrire des user stories utiles", "description": "Comment formuler des user stories qui aident vraiment l'équipe de dev.", "date": "2026-06-19", "startTime": "10:00", "duration": 60, "organizers": ["Elise Moreau"], "linkId": 1, "tags": ["Produit"], "registrations": ["Vous", "Julie Bernard"] },
+    { "id": "e4", "type": "lm", "status": "ouvert", "title": "Accessibilité web : les fondamentaux", "description": "Les critères RGAA essentiels à connaître avant de livrer une interface.", "date": "2026-07-03", "startTime": "10:30", "duration": 90, "organizers": ["Hugo Simon"], "linkId": 1, "tags": ["UX", "Frontend"], "registrations": ["Vous"] },
+    { "id": "e5", "type": "talk", "status": "ouvert", "title": "ECC Talk — L'IA générative dans nos métiers", "description": "Une plénière sur les usages concrets de l'IA générative observés cette année.", "date": "2026-06-19", "startTime": "11:00", "duration": 60, "organizers": ["Direction Innovation"], "linkId": 3, "tags": ["IA"], "registrations": ["Vous", "Sofia Rossi", "Marc Lefevre", "Julie Bernard"] },
+    { "id": "e6", "type": "talk", "status": "ouvert", "title": "ECC Talk — Sobriété numérique", "description": "Comment réduire l'empreinte de nos systèmes d'information sans sacrifier la performance.", "date": "2026-07-17", "startTime": "10:00", "duration": 60, "organizers": ["Direction RSE"], "linkId": 1, "tags": ["RSE"], "registrations": ["Aline Petit"] }
+  ],
+  "squads": [
+    {
+      "id": "s1", "name": "Squad Accessibilité", "logo": "A11Y",
+      "description": "Diffuser les bonnes pratiques d'accessibilité numérique dans tous les projets.",
+      "pageLink": "https://intranet.example.com/squads/a11y",
+      "planning": "1 réunion par mois, 1h",
+      "tags": ["UX", "Frontend"],
+      "coreTeam": ["Hugo Simon", "Elise Moreau"],
+      "participants": ["Vous", "Julie Bernard", "Karim Haddad"]
+    },
+    {
+      "id": "s2", "name": "Squad Plateforme Data", "logo": "DATA",
+      "description": "Mutualiser les outils et standards data entre les équipes produit.",
+      "pageLink": "https://intranet.example.com/squads/data",
+      "planning": "1 réunion toutes les 2 semaines, 45 min",
+      "tags": ["Data", "Cloud"],
+      "coreTeam": ["Marc Lefevre", "Thomas Nguyen", "Sofia Rossi"],
+      "participants": ["Aline Petit"]
+    }
+  ]
+}

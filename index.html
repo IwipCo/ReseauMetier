@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Réseau Métier</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  ::-webkit-scrollbar { height: 8px; width: 8px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react,env">
+const { useState, useEffect, useMemo } = React;
+
+/* ---------- Constantes & thème ---------- */
+const TYPE = {
+  lm:    { label: "Learning Moment", short: "LM",   btn: "bg-teal-700 hover:bg-teal-800",
+           chip: "bg-teal-50 text-teal-800", chipDark: "bg-teal-950 text-teal-300" },
+  talk:  { label: "ECC Talk",        short: "Talk", btn: "bg-orange-700 hover:bg-orange-800",
+           chip: "bg-orange-50 text-orange-800", chipDark: "bg-orange-950 text-orange-300" },
+  squad: { label: "Squad",           short: "Squad",btn: "bg-violet-700 hover:bg-violet-800",
+           chip: "bg-violet-50 text-violet-800", chipDark: "bg-violet-950 text-violet-300" },
+};
+const CURRENT_USER = "Vous";
+const TODAY = "2026-07-22";
+const STORAGE_KEY = "reseau-metier-store-v1";
+const emptyForm = { title: "", description: "", date: "", startTime: "10:00", duration: 60, organizers: "", tags: "" };
+const emptySquadForm = { name: "", description: "", logo: "", pageLink: "", planning: "", tags: "", coreTeam: "", participants: "" };
+
+function monthKey(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("fr-FR", { month: "long", year: "numeric" });
+}
+function formatDate(dateStr) {
+  const d = new Date(dateStr + "T00:00:00");
+  return d.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+}
+function isPast(dateStr) { return new Date(dateStr + "T00:00:00") < new Date(TODAY + "T00:00:00"); }
+function pickFreeLink(events, links, date) {
+  const used = new Set(events.filter(e => e.date === date).map(e => e.linkId));
+  const free = links.find(l => !used.has(l.id));
+  return free ? free.id : links[0].id;
+}
+function toTags(str) { return str.split(",").map(s => s.trim()).filter(Boolean); }
+
+/* Petites icônes texte pour rester autonome (pas de dépendance externe) */
+const Chevron = () => <span aria-hidden="true">›</span>;
+
+function App() {
+  const [loading, setLoading] = useState(true);
+  const [people, setPeople] = useState([]);
+  const [visioLinks, setVisioLinks] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [squads, setSquads] = useState([]);
+
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [darkMode, setDarkMode] = useState(false);
+  const [tab, setTab] = useState("lm");
+  const [viewMode, setViewMode] = useState("card");
+  const [statusFilter, setStatusFilter] = useState("ouvert");
+  const [tagFilter, setTagFilter] = useState(null);
+  const [monthFilter, setMonthFilter] = useState("tous");
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState(emptyForm);
+  const [squadForm, setSquadForm] = useState(emptySquadForm);
+  const [selectedPerson, setSelectedPerson] = useState(null);
+
+  /* ---------- Chargement des données : localStorage (édité) sinon data.json (source) ---------- */
+  useEffect(() => {
+    async function load() {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      try {
+        const res = await fetch("./data.json");
+        const seed = await res.json();
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          setPeople(seed.people);
+          setVisioLinks(seed.visioLinks);
+          setEvents(parsed.events || seed.events);
+          setSquads(parsed.squads || seed.squads);
+        } else {
+          setPeople(seed.people);
+          setVisioLinks(seed.visioLinks);
+          setEvents(seed.events);
+          setSquads(seed.squads);
+        }
+      } catch (err) {
+        console.error("Impossible de charger data.json", err);
+      }
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  /* Persistance locale des modifications (navigateur courant uniquement, voir note de déploiement) */
+  useEffect(() => {
+    if (loading) return;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ events, squads }));
+  }, [events, squads, loading]);
+
+  const t = darkMode ? {
+    page: "bg-slate-950 text-slate-100", panel: "bg-slate-900 border-slate-800", border: "border-slate-800",
+    subtext: "text-slate-400", faint: "text-slate-500", input: "bg-slate-950 border-slate-700 text-slate-100 placeholder-slate-500",
+    tableHead: "bg-slate-900 text-slate-400", rowBorder: "border-slate-800", chipNeutral: "bg-slate-800 text-slate-300",
+    tabInactive: "text-slate-500 hover:text-slate-200", tabActive: "border-slate-100 text-slate-100",
+    warn: "text-amber-300 bg-amber-950 border-amber-900", over: "text-red-300 bg-red-950",
+    toggleBtn: "bg-slate-100 text-slate-900 border-slate-100", toggleBtnOff: "bg-slate-900 text-slate-300 border-slate-700",
+    modalOverlay: "bg-black/60", tagPill: "bg-slate-800 text-slate-300 border-slate-700", tagPillActive: "bg-slate-100 text-slate-900 border-slate-100",
+  } : {
+    page: "bg-white text-slate-800", panel: "bg-white border-slate-200", border: "border-slate-200",
+    subtext: "text-slate-500", faint: "text-slate-400", input: "bg-white border-slate-300 text-slate-800 placeholder-slate-400",
+    tableHead: "bg-slate-50 text-slate-500", rowBorder: "border-slate-100", chipNeutral: "bg-slate-100 text-slate-600",
+    tabInactive: "text-slate-500 hover:text-slate-700", tabActive: "border-slate-900 text-slate-900",
+    warn: "text-amber-800 bg-amber-50 border-amber-200", over: "text-red-700 bg-red-50",
+    toggleBtn: "bg-slate-900 text-white border-slate-900", toggleBtnOff: "bg-white text-slate-600 border-slate-300",
+    modalOverlay: "bg-black/45", tagPill: "bg-slate-100 text-slate-600 border-slate-200", tagPillActive: "bg-slate-900 text-white border-slate-900",
+  };
+
+  const tabs = [
+    { id: "lm", label: "Learning Moments" },
+    { id: "talk", label: "ECC Talks" },
+    { id: "squad", label: "Squads" },
+    ...(isAdmin ? [{ id: "synthese", label: "Synthèse admin" }] : []),
+  ];
+
+  function toggleRegister(eventId) {
+    setEvents(evts => evts.map(e => {
+      if (e.id !== eventId) return e;
+      const already = e.registrations.includes(CURRENT_USER);
+      return { ...e, registrations: already ? e.registrations.filter(p => p !== CURRENT_USER) : [...e.registrations, CURRENT_USER] };
+    }));
+  }
+  function closeEvent(id) { setEvents(evts => evts.map(e => e.id === id ? { ...e, status: "ferme" } : e)); }
+  function reopenEvent(id) { setEvents(evts => evts.map(e => e.id === id ? { ...e, status: "ouvert" } : e)); }
+  function openCreate(type) { setForm(emptyForm); setModal(type); }
+
+  function submitEvent(e) {
+    e.preventDefault();
+    if (!form.title || !form.date) return;
+    const linkId = pickFreeLink(events, visioLinks, form.date);
+    const newEvent = {
+      id: `e${Date.now()}`, type: modal, status: "ouvert",
+      title: form.title, description: form.description, date: form.date,
+      startTime: form.startTime || "10:00", duration: Number(form.duration) || 60,
+      organizers: toTags(form.organizers), linkId, tags: toTags(form.tags), registrations: [],
+    };
+    setEvents(evts => [...evts, newEvent]);
+    setModal(null);
+  }
+
+  function submitSquad(e) {
+    e.preventDefault();
+    if (!squadForm.name) return;
+    const newSquad = {
+      id: `s${Date.now()}`, name: squadForm.name,
+      logo: (squadForm.logo || squadForm.name.slice(0, 4)).toUpperCase(),
+      description: squadForm.description, pageLink: squadForm.pageLink, planning: squadForm.planning,
+      tags: toTags(squadForm.tags), coreTeam: toTags(squadForm.coreTeam), participants: toTags(squadForm.participants),
+    };
+    setSquads(sq => [...sq, newSquad]);
+    setModal(null);
+    setSquadForm(emptySquadForm);
+  }
+
+  function joinSquad(squadId) {
+    setSquads(sqs => sqs.map(s => {
+      if (s.id !== squadId) return s;
+      if (s.coreTeam.includes(CURRENT_USER) || s.participants.includes(CURRENT_USER)) return s;
+      return { ...s, participants: [...s.participants, CURRENT_USER] };
+    }));
+  }
+
+  const synthesis = useMemo(() => {
+    const rows = {};
+    people.forEach(p => { rows[p] = {}; });
+    events.forEach(e => {
+      const mk = monthKey(e.date);
+      e.registrations.forEach(p => { if (!rows[p]) rows[p] = {}; rows[p][mk] = (rows[p][mk] || 0) + 1; });
+    });
+    const currentMonth = monthKey(TODAY);
+    squads.forEach(s => {
+      [...s.coreTeam, ...s.participants].forEach(p => { if (!rows[p]) rows[p] = {}; rows[p][currentMonth] = (rows[p][currentMonth] || 0) + 1; });
+    });
+    const months = Array.from(new Set(events.map(e => monthKey(e.date)).concat([currentMonth])))
+      .sort((a, b) => new Date("1 " + a) - new Date("1 " + b));
+    return { rows, months };
+  }, [events, squads, people]);
+
+  function personDetail(person) {
+    const myEvents = events.filter(e => e.registrations.includes(person)).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
+    const mySquads = squads.filter(s => s.coreTeam.includes(person) || s.participants.includes(person))
+      .map(s => ({ ...s, role: s.coreTeam.includes(person) ? "Core team" : "Participant" }));
+    return { myEvents, mySquads };
+  }
+
+  function exportCSV() {
+    const lines = [["personne", "mois", "type", "titre", "statut"].join(";")];
+    events.forEach(e => e.registrations.forEach(p => lines.push([p, monthKey(e.date), TYPE[e.type].label, e.title, e.status].join(";"))));
+    squads.forEach(s => [...s.coreTeam, ...s.participants].forEach(p => lines.push([p, monthKey(TODAY), "Squad", s.name, "actif"].join(";"))));
+    downloadFile("export_participation.csv", lines.join("\n"), "text/csv");
+  }
+  function exportJSON() {
+    const data = { people, visioLinks, events, squads };
+    downloadFile("data.json", JSON.stringify(data, null, 2), "application/json");
+  }
+  function resetFromSeed() {
+    localStorage.removeItem(STORAGE_KEY);
+    window.location.reload();
+  }
+  function downloadFile(name, content, mime) {
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  if (loading) {
+    return <div className="p-10 text-center text-slate-400">Chargement des données…</div>;
+  }
+
+  const allTags = Array.from(new Set(
+    (tab === "squad" ? squads : events.filter(e => e.type === tab)).flatMap(x => x.tags || [])
+  ));
+  const visibleEvents = events.filter(e =>
+    e.type === tab &&
+    (statusFilter === "tous" || e.status === statusFilter) &&
+    (!tagFilter || (e.tags || []).includes(tagFilter))
+  ).sort((a, b) => new Date(a.date + "T" + a.startTime) - new Date(b.date + "T" + b.startTime));
+  const visibleSquads = squads.filter(s => !tagFilter || (s.tags || []).includes(tagFilter));
+  const detail = selectedPerson ? personDetail(selectedPerson) : null;
+  const monthsToShow = monthFilter === "tous" ? synthesis.months : [monthFilter];
+
+  return (
+    <div className={`min-h-screen ${t.page}`}>
+      <div className="max-w-5xl mx-auto p-5">
+        {/* ---------- Header ---------- */}
+        <div className={`flex flex-wrap items-center justify-between gap-3 pb-5 border-b ${t.border}`}>
+          <div className="flex items-center gap-3">
+            <svg width="34" height="34" viewBox="0 0 34 34">
+              <circle cx="8" cy="26" r="4" fill="#0f6e56" />
+              <circle cx="26" cy="26" r="4" fill="#993c1d" />
+              <circle cx="17" cy="7" r="4" fill="#534ab7" />
+              <line x1="8" y1="26" x2="17" y2="7" stroke={darkMode ? "#57564f" : "#b4b2a9"} strokeWidth="1.5" />
+              <line x1="26" y1="26" x2="17" y2="7" stroke={darkMode ? "#57564f" : "#b4b2a9"} strokeWidth="1.5" />
+              <line x1="8" y1="26" x2="26" y2="26" stroke={darkMode ? "#57564f" : "#b4b2a9"} strokeWidth="1.5" />
+            </svg>
+            <div>
+              <div className="text-xl font-semibold tracking-tight">Réseau Métier</div>
+              <div className={`text-xs ${t.faint}`}>Learning Moments · ECC Talks · Squads</div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button onClick={() => setDarkMode(d => !d)} aria-label="Basculer le mode sombre"
+              className={`w-8 h-8 rounded-full border text-sm ${t.toggleBtnOff}`}>{darkMode ? "☀" : "☾"}</button>
+            <button onClick={() => setIsAdmin(a => !a)}
+              className={`text-sm px-3 py-1.5 rounded-full border ${isAdmin ? t.toggleBtn : t.toggleBtnOff}`}>
+              {isAdmin ? "Vue admin activée" : "Activer la vue admin"}
+            </button>
+          </div>
+        </div>
+
+        {/* ---------- Tabs ---------- */}
+        <div className={`flex gap-1 mt-5 border-b overflow-x-auto ${t.border}`}>
+          {tabs.map(tb => (
+            <button key={tb.id} onClick={() => { setTab(tb.id); setSelectedPerson(null); setTagFilter(null); }}
+              className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap ${tab === tb.id ? t.tabActive : `border-transparent ${t.tabInactive}`}`}>
+              {tb.label}
+            </button>
+          ))}
+        </div>
+
+        {/* ---------- LM / Talk ---------- */}
+        {(tab === "lm" || tab === "talk") && (
+          <div className="mt-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+              <div className={`text-sm ${t.subtext}`}>{visibleEvents.length} élément(s) affiché(s)</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className={`text-sm border rounded-lg px-2 py-1.5 ${t.input}`}>
+                  <option value="ouvert">Ouverts</option>
+                  <option value="ferme">Historique (fermés)</option>
+                  <option value="tous">Tous</option>
+                </select>
+                <div className={`flex rounded-lg border overflow-hidden ${t.border}`}>
+                  <button onClick={() => setViewMode("card")} className={`px-2 py-1.5 text-xs ${viewMode === "card" ? t.toggleBtn : t.panel}`}>Cartes</button>
+                  <button onClick={() => setViewMode("list")} className={`px-2 py-1.5 text-xs ${viewMode === "list" ? t.toggleBtn : t.panel}`}>Liste</button>
+                </div>
+                {(tab === "lm" || isAdmin) && (
+                  <button onClick={() => openCreate(tab)} className={`text-sm text-white px-3 py-1.5 rounded-lg ${TYPE[tab].btn}`}>
+                    + Créer {tab === "lm" ? "un Learning Moment" : "un Talk"}
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {allTags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-4">
+                {allTags.map(tg => (
+                  <button key={tg} onClick={() => setTagFilter(f => f === tg ? null : tg)}
+                    className={`text-xs px-2 py-0.5 rounded-full border ${tagFilter === tg ? t.tagPillActive : t.tagPill}`}>
+                    #{tg}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {tab === "talk" && !isAdmin && (
+              <div className={`mb-4 text-xs rounded-lg px-3 py-2 border ${t.warn}`}>Seuls les admins peuvent créer un ECC Talk. Activez la vue admin pour tester.</div>
+            )}
+
+            <div className={viewMode === "card" ? "grid grid-cols-1 md:grid-cols-2 gap-4" : "flex flex-col gap-3"}>
+              {visibleEvents.map(ev => {
+                const registered = ev.registrations.includes(CURRENT_USER);
+                const link = visioLinks.find(l => l.id === ev.linkId);
+                const closed = ev.status === "ferme";
+                return (
+                  <div key={ev.id} className={`border rounded-xl p-4 ${t.panel} ${closed ? "opacity-70" : ""}`}>
+                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${darkMode ? TYPE[ev.type].chipDark : TYPE[ev.type].chip}`}>{TYPE[ev.type].short}</span>
+                      {closed && <span className={`text-xs px-2 py-0.5 rounded-full ${t.chipNeutral}`}>Historique</span>}
+                      <span className={`text-xs ${t.faint}`}>{formatDate(ev.date)}</span>
+                      <span className={`text-xs ${t.faint}`}>· {ev.startTime} · {ev.duration} min</span>
+                    </div>
+                    <div className="font-medium">{ev.title}</div>
+                    <div className={`text-sm mt-1 ${t.subtext}`}>{ev.description}</div>
+                    <div className={`text-xs mt-2 ${t.faint}`}>Organisé par {ev.organizers.join(", ")}</div>
+                    <div className={`text-xs mt-1 ${t.faint}`}>Lien Teams n°{link ? link.id : "?"} — envoyé automatiquement la veille aux inscrits</div>
+                    {(ev.tags || []).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {ev.tags.map(tg => <span key={tg} className={`text-xs px-2 py-0.5 rounded-full border ${t.tagPill}`}>#{tg}</span>)}
+                      </div>
+                    )}
+                    <div className={`text-xs mt-2 ${t.subtext}`}>
+                      Inscrits ({ev.registrations.length}) : {ev.registrations.length ? ev.registrations.join(", ") : "aucun pour l'instant"}
+                    </div>
+                    <div className="flex items-center gap-2 mt-3 flex-wrap">
+                      {!closed && (
+                        <button onClick={() => toggleRegister(ev.id)}
+                          className={`text-xs font-medium px-3 py-1.5 rounded-lg border ${registered ? `${t.chipNeutral} border-transparent` : `text-white border-transparent ${TYPE[ev.type].btn}`}`}>
+                          {registered ? "Se désinscrire" : "S'inscrire"}
+                        </button>
+                      )}
+                      {isAdmin && !closed && isPast(ev.date) && (
+                        <button onClick={() => closeEvent(ev.id)} className={`text-xs px-3 py-1.5 rounded-lg border ${t.border}`}>Clôturer</button>
+                      )}
+                      {isAdmin && closed && (
+                        <button onClick={() => reopenEvent(ev.id)} className={`text-xs px-3 py-1.5 rounded-lg border ${t.border}`}>Ré-ouvrir</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              {visibleEvents.length === 0 && <div className={`text-sm ${t.faint} border rounded-xl p-6 text-center ${t.border}`}>Aucun élément pour ce filtre.</div>}
+            </div>
+          </div>
+        )}
+
+        {/* ---------- Squads ---------- */}
+        {tab === "squad" && (
+          <div className="mt-5">
+            <div className="flex items-center justify-between mb-3">
+              <div className={`text-sm ${t.subtext}`}>{visibleSquads.length} squad(s)</div>
+              {isAdmin && (
+                <button onClick={() => { setSquadForm(emptySquadForm); setModal("squad"); }} className={`text-sm text-white px-3 py-1.5 rounded-lg ${TYPE.squad.btn}`}>+ Créer une squad</button>
+              )}
+            </div>
+            {allTags.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-4">
+                {allTags.map(tg => (
+                  <button key={tg} onClick={() => setTagFilter(f => f === tg ? null : tg)}
+                    className={`text-xs px-2 py-0.5 rounded-full border ${tagFilter === tg ? t.tagPillActive : t.tagPill}`}>#{tg}</button>
+                ))}
+              </div>
+            )}
+            {!isAdmin && (
+              <div className={`mb-4 text-xs rounded-lg px-3 py-2 border ${t.warn}`}>Seuls les admins peuvent créer une squad. Activez la vue admin pour tester.</div>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {visibleSquads.map(s => {
+                const isMember = s.coreTeam.includes(CURRENT_USER) || s.participants.includes(CURRENT_USER);
+                return (
+                  <div key={s.id} className={`border rounded-xl p-4 ${t.panel}`}>
+                    <div className="flex items-center gap-3 mb-2">
+                      <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xs font-semibold ${darkMode ? TYPE.squad.chipDark : TYPE.squad.chip}`}>{s.logo}</div>
+                      <div>
+                        <div className="font-medium">{s.name}</div>
+                        <div className={`text-xs ${t.faint}`}>{s.planning}</div>
+                      </div>
+                    </div>
+                    <div className={`text-sm ${t.subtext}`}>{s.description}</div>
+                    <a href={s.pageLink} className="text-xs text-violet-500">Page dédiée <Chevron /></a>
+                    {(s.tags || []).length > 0 && (
+                      <div className="flex flex-wrap gap-1 mt-2">
+                        {s.tags.map(tg => <span key={tg} className={`text-xs px-2 py-0.5 rounded-full border ${t.tagPill}`}>#{tg}</span>)}
+                      </div>
+                    )}
+                    <div className="grid grid-cols-2 gap-3 mt-3 text-xs">
+                      <div><div className={`mb-1 ${t.faint}`}>Core team ({s.coreTeam.length})</div><div className={t.subtext}>{s.coreTeam.join(", ") || "—"}</div></div>
+                      <div><div className={`mb-1 ${t.faint}`}>Participants ({s.participants.length})</div><div className={t.subtext}>{s.participants.join(", ") || "—"}</div></div>
+                    </div>
+                    <button disabled={isMember} onClick={() => joinSquad(s.id)}
+                      className={`mt-3 text-xs font-medium px-3 py-1.5 rounded-lg border ${isMember ? `${t.chipNeutral} border-transparent` : `text-white border-transparent ${TYPE.squad.btn}`}`}>
+                      {isMember ? "Déjà membre" : "Rejoindre comme participant"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ---------- Synthèse admin ---------- */}
+        {tab === "synthese" && isAdmin && !selectedPerson && (
+          <div className="mt-5">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+              <div className={`text-sm ${t.subtext}`}>Total LM + Talk + Squad par personne (règle : max 2 / mois)</div>
+              <div className="flex items-center gap-2">
+                <select value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className={`text-sm border rounded-lg px-2 py-1.5 ${t.input}`}>
+                  <option value="tous">Tous les mois</option>
+                  {synthesis.months.map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+                <button onClick={exportCSV} className={`text-sm px-3 py-1.5 rounded-lg border ${t.border}`}>Export CSV</button>
+                <button onClick={exportJSON} className={`text-sm px-3 py-1.5 rounded-lg border ${t.border}`}>Export data.json</button>
+              </div>
+            </div>
+            <div className={`overflow-x-auto border rounded-xl ${t.border}`}>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className={`text-left text-xs ${t.tableHead}`}>
+                    <th className="px-3 py-2 font-medium">Personne</th>
+                    {monthsToShow.map(m => <th key={m} className="px-3 py-2 font-medium capitalize font-mono">{m}</th>)}
+                    <th className="px-3 py-2"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {people.map(p => (
+                    <tr key={p} className={`border-t ${t.rowBorder}`}>
+                      <td className="px-3 py-2">{p}</td>
+                      {monthsToShow.map(m => {
+                        const val = synthesis.rows[p]?.[m] || 0;
+                        const over = val > 2;
+                        return <td key={m} className={`px-3 py-2 font-mono ${over ? `${t.over} font-medium` : t.subtext}`}>{val || "—"}</td>;
+                      })}
+                      <td className="px-3 py-2 text-right">
+                        <button onClick={() => setSelectedPerson(p)} className="text-xs text-violet-500">Détail <Chevron /></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className={`mt-3 text-xs ${t.faint}`}>
+              Note : cette maquette persiste ses modifications uniquement dans votre navigateur (localStorage). Utilisez "Export data.json" pour récupérer un fichier à recommitter dans le dépôt si vous voulez que ces changements deviennent la nouvelle référence partagée.
+            </div>
+          </div>
+        )}
+
+        {/* ---------- Détail personne ---------- */}
+        {tab === "synthese" && isAdmin && selectedPerson && (
+          <div className="mt-5">
+            <button onClick={() => setSelectedPerson(null)} className={`text-sm mb-4 ${t.subtext}`}>← Retour à la synthèse</button>
+            <div className="text-lg font-medium mb-1">{selectedPerson}</div>
+            <div className={`text-sm mb-4 ${t.faint}`}>{detail.myEvents.length} LM/Talk suivi(s) · {detail.mySquads.length} squad(s)</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <div className={`text-xs font-medium mb-2 ${t.faint}`}>Learning Moments & Talks</div>
+                <div className="flex flex-col gap-2">
+                  {detail.myEvents.map(e => (
+                    <div key={e.id} className={`border rounded-lg p-3 text-sm ${t.panel}`}>
+                      <div className="flex items-center gap-2 mb-1 flex-wrap">
+                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${darkMode ? TYPE[e.type].chipDark : TYPE[e.type].chip}`}>{TYPE[e.type].short}</span>
+                        <span className={`text-xs ${t.faint}`}>{formatDate(e.date)} · {e.startTime}</span>
+                        {e.status === "ferme" && <span className={`text-xs px-2 py-0.5 rounded-full ${t.chipNeutral}`}>Historique</span>}
+                      </div>
+                      <div>{e.title}</div>
+                    </div>
+                  ))}
+                  {detail.myEvents.length === 0 && <div className={`text-sm ${t.faint}`}>Aucune inscription.</div>}
+                </div>
+              </div>
+              <div>
+                <div className={`text-xs font-medium mb-2 ${t.faint}`}>Squads</div>
+                <div className="flex flex-col gap-2">
+                  {detail.mySquads.map(s => (
+                    <div key={s.id} className={`border rounded-lg p-3 text-sm ${t.panel}`}>
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${darkMode ? TYPE.squad.chipDark : TYPE.squad.chip}`}>{s.role}</span>
+                      <div className="mt-1">{s.name}</div>
+                    </div>
+                  ))}
+                  {detail.mySquads.length === 0 && <div className={`text-sm ${t.faint}`}>Aucune squad.</div>}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {isAdmin && (
+          <div className="mt-8 pt-4 border-t border-dashed border-slate-300/40 flex justify-end">
+            <button onClick={resetFromSeed} className={`text-xs px-3 py-1.5 rounded-lg border ${t.border} ${t.faint}`}>
+              Réinitialiser depuis data.json
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* ---------- Modale LM / Talk ---------- */}
+      {(modal === "lm" || modal === "talk") && (
+        <div style={{ minHeight: 400 }} className={`fixed inset-0 flex items-center justify-center z-10 ${t.modalOverlay}`}>
+          <form onSubmit={submitEvent} className={`rounded-xl p-5 w-full max-w-md border ${t.panel}`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-medium">Créer {modal === "lm" ? "un Learning Moment" : "un ECC Talk"}</div>
+              <button type="button" onClick={() => setModal(null)}>✕</button>
+            </div>
+            <div className="flex flex-col gap-3 text-sm">
+              <input required placeholder="Titre / sujet" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
+              <textarea placeholder="Description" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} rows={3} />
+              <div className="flex gap-3">
+                <input required type="date" value={form.date} onChange={e => setForm(f => ({ ...f, date: e.target.value }))} className={`border rounded-lg px-3 py-2 flex-1 ${t.input}`} />
+                <input required type="time" value={form.startTime} onChange={e => setForm(f => ({ ...f, startTime: e.target.value }))} className={`border rounded-lg px-3 py-2 w-28 ${t.input}`} />
+                <input type="number" min={15} step={15} value={form.duration} onChange={e => setForm(f => ({ ...f, duration: e.target.value }))} className={`border rounded-lg px-3 py-2 w-24 ${t.input}`} />
+              </div>
+              <input placeholder="Organisateur(s), séparés par des virgules" value={form.organizers} onChange={e => setForm(f => ({ ...f, organizers: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
+              <input placeholder="Tags, séparés par des virgules (ex: UX, Cloud)" value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
+              <div className={`text-xs ${t.faint}`}>Un lien visio disponible sera assigné automatiquement parmi les {visioLinks.length} liens permanents.</div>
+            </div>
+            <button type="submit" className={`mt-4 w-full text-white rounded-lg py-2 text-sm ${TYPE[modal].btn}`}>Créer</button>
+          </form>
+        </div>
+      )}
+
+      {/* ---------- Modale Squad ---------- */}
+      {modal === "squad" && (
+        <div style={{ minHeight: 400 }} className={`fixed inset-0 flex items-center justify-center z-10 ${t.modalOverlay}`}>
+          <form onSubmit={submitSquad} className={`rounded-xl p-5 w-full max-w-md border ${t.panel}`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-medium">Créer une squad</div>
+              <button type="button" onClick={() => setModal(null)}>✕</button>
+            </div>
+            <div className="flex flex-col gap-3 text-sm">
+              <input required placeholder="Nom de la squad" value={squadForm.name} onChange={e => setSquadForm(f => ({ ...f, name: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
+              <textarea placeholder="Description" value={squadForm.description} onChange={e => setSquadForm(f => ({ ...f, description: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} rows={3} />
+              <input placeholder="Logo (initiales, ex: DATA)" value={squadForm.logo} onChange={e => setSquadForm(f => ({ ...f, logo: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
+              <input placeholder="Lien de la page dédiée" value={squadForm.pageLink} onChange={e => setSquadForm(f => ({ ...f, pageLink: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
+              <input placeholder="Planning (ex: 1 réunion / mois, 1h)" value={squadForm.planning} onChange={e => setSquadForm(f => ({ ...f, planning: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
+              <input placeholder="Tags, séparés par des virgules" value={squadForm.tags} onChange={e => setSquadForm(f => ({ ...f, tags: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
+              <input placeholder="Core team, séparés par des virgules" value={squadForm.coreTeam} onChange={e => setSquadForm(f => ({ ...f, coreTeam: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
+              <input placeholder="Participants, séparés par des virgules" value={squadForm.participants} onChange={e => setSquadForm(f => ({ ...f, participants: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
+            </div>
+            <button type="submit" className={`mt-4 w-full text-white rounded-lg py-2 text-sm ${TYPE.squad.btn}`}>Créer</button>
+          </form>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
