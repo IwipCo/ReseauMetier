@@ -50,11 +50,32 @@ function pickFreeLink(events, links, date) {
 }
 function toTags(str) { return str.split(",").map(s => s.trim()).filter(Boolean); }
 
+/* Copie de secours des données, utilisée si data.json ne peut pas être chargé
+   (ex: fichier ouvert en double-clic, en file:// — le fetch est alors bloqué par le navigateur).
+   Sur un vrai déploiement (serveur ou GitHub Pages), c'est data.json qui fait foi. */
+const FALLBACK_SEED = {
+  people: ["Vous", "Camille Durand", "Yanis Belkacem", "Sofia Rossi", "Marc Lefevre", "Aline Petit", "Karim Haddad", "Elise Moreau", "Thomas Nguyen", "Julie Bernard", "Hugo Simon"],
+  visioLinks: Array.from({ length: 10 }, (_, i) => ({ id: i + 1, url: `https://teams.microsoft.com/l/meetup-join/lien-permanent-${i + 1}` })),
+  events: [
+    { id: "e1", type: "lm", status: "ferme", title: "Introduction au Design Thinking", description: "Un tour d'horizon des méthodes de co-création pour cadrer un besoin utilisateur en 2h.", date: "2026-06-05", startTime: "10:00", duration: 120, organizers: ["Camille Durand"], linkId: 1, tags: ["Méthodologie", "UX"], registrations: ["Vous", "Yanis Belkacem", "Sofia Rossi"] },
+    { id: "e2", type: "lm", status: "ferme", title: "Bonnes pratiques Terraform", description: "Retour d'expérience sur la structuration de modules Terraform à grande échelle.", date: "2026-06-05", startTime: "10:30", duration: 90, organizers: ["Marc Lefevre", "Karim Haddad"], linkId: 2, tags: ["Cloud", "DevOps"], registrations: ["Aline Petit", "Thomas Nguyen"] },
+    { id: "e3", type: "lm", status: "ouvert", title: "Écrire des user stories utiles", description: "Comment formuler des user stories qui aident vraiment l'équipe de dev.", date: "2026-06-19", startTime: "10:00", duration: 60, organizers: ["Elise Moreau"], linkId: 1, tags: ["Produit"], registrations: ["Vous", "Julie Bernard"] },
+    { id: "e4", type: "lm", status: "ouvert", title: "Accessibilité web : les fondamentaux", description: "Les critères RGAA essentiels à connaître avant de livrer une interface.", date: "2026-07-03", startTime: "10:30", duration: 90, organizers: ["Hugo Simon"], linkId: 1, tags: ["UX", "Frontend"], registrations: ["Vous"] },
+    { id: "e5", type: "talk", status: "ouvert", title: "ECC Talk — L'IA générative dans nos métiers", description: "Une plénière sur les usages concrets de l'IA générative observés cette année.", date: "2026-06-19", startTime: "11:00", duration: 60, organizers: ["Direction Innovation"], linkId: 3, tags: ["IA"], registrations: ["Vous", "Sofia Rossi", "Marc Lefevre", "Julie Bernard"] },
+    { id: "e6", type: "talk", status: "ouvert", title: "ECC Talk — Sobriété numérique", description: "Comment réduire l'empreinte de nos systèmes d'information sans sacrifier la performance.", date: "2026-07-17", startTime: "10:00", duration: 60, organizers: ["Direction RSE"], linkId: 1, tags: ["RSE"], registrations: ["Aline Petit"] },
+  ],
+  squads: [
+    { id: "s1", name: "Squad Accessibilité", logo: "A11Y", description: "Diffuser les bonnes pratiques d'accessibilité numérique dans tous les projets.", pageLink: "https://intranet.example.com/squads/a11y", planning: "1 réunion par mois, 1h", tags: ["UX", "Frontend"], coreTeam: ["Hugo Simon", "Elise Moreau"], participants: ["Vous", "Julie Bernard", "Karim Haddad"] },
+    { id: "s2", name: "Squad Plateforme Data", logo: "DATA", description: "Mutualiser les outils et standards data entre les équipes produit.", pageLink: "https://intranet.example.com/squads/data", planning: "1 réunion toutes les 2 semaines, 45 min", tags: ["Data", "Cloud"], coreTeam: ["Marc Lefevre", "Thomas Nguyen", "Sofia Rossi"], participants: ["Aline Petit"] },
+  ],
+};
+
 /* Petites icônes texte pour rester autonome (pas de dépendance externe) */
 const Chevron = () => <span aria-hidden="true">›</span>;
 
 function App() {
   const [loading, setLoading] = useState(true);
+  const [usingFallback, setUsingFallback] = useState(false);
   const [people, setPeople] = useState([]);
   const [visioLinks, setVisioLinks] = useState([]);
   const [events, setEvents] = useState([]);
@@ -76,24 +97,27 @@ function App() {
   useEffect(() => {
     async function load() {
       const saved = localStorage.getItem(STORAGE_KEY);
+      let seed = FALLBACK_SEED;
+      let usedFallback = true;
       try {
         const res = await fetch("./data.json");
-        const seed = await res.json();
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          setPeople(seed.people);
-          setVisioLinks(seed.visioLinks);
-          setEvents(parsed.events || seed.events);
-          setSquads(parsed.squads || seed.squads);
-        } else {
-          setPeople(seed.people);
-          setVisioLinks(seed.visioLinks);
-          setEvents(seed.events);
-          setSquads(seed.squads);
-        }
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        seed = await res.json();
+        usedFallback = false;
       } catch (err) {
-        console.error("Impossible de charger data.json", err);
+        console.warn("data.json non chargé (normal si ouvert en file://) — utilisation des données de secours embarquées.", err);
       }
+      setPeople(seed.people);
+      setVisioLinks(seed.visioLinks);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        setEvents(parsed.events || seed.events);
+        setSquads(parsed.squads || seed.squads);
+      } else {
+        setEvents(seed.events);
+        setSquads(seed.squads);
+      }
+      setUsingFallback(usedFallback);
       setLoading(false);
     }
     load();
@@ -266,6 +290,12 @@ function App() {
             </button>
           </div>
         </div>
+
+        {usingFallback && (
+          <div className={`mt-4 text-xs rounded-lg px-3 py-2 border ${t.warn}`}>
+            data.json n'a pas pu être chargé (probablement parce que la page est ouverte en double-clic, sans serveur) — l'app utilise une copie de données embarquée à la place. Sur GitHub Pages, ce message n'apparaîtra pas.
+          </div>
+        )}
 
         {/* ---------- Tabs ---------- */}
         <div className={`flex gap-1 mt-5 border-b overflow-x-auto ${t.border}`}>
