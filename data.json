@@ -28,7 +28,8 @@
       "id": "s1", "name": "Squad Accessibilité", "logo": "A11Y",
       "description": "Diffuser les bonnes pratiques d'accessibilité numérique dans tous les projets.",
       "pageLink": "https://intranet.example.com/squads/a11y",
-      "planning": "1 réunion par mois, 1h",
+      "recurrence": "monthly",
+      "meetingDuration": 60,
       "tags": ["UX", "Frontend"],
       "coreTeam": ["Hugo Simon", "Elise Moreau"],
       "participants": ["Vous", "Julie Bernard", "Karim Haddad"]
@@ -37,7 +38,8 @@
       "id": "s2", "name": "Squad Plateforme Data", "logo": "DATA",
       "description": "Mutualiser les outils et standards data entre les équipes produit.",
       "pageLink": "https://intranet.example.com/squads/data",
-      "planning": "1 réunion toutes les 2 semaines, 45 min",
+      "recurrence": "biweekly",
+      "meetingDuration": 45,
       "tags": ["Data", "Cloud"],
       "coreTeam": ["Marc Lefevre", "Thomas Nguyen", "Sofia Rossi"],
       "participants": ["Aline Petit"]
