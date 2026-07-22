@@ -32,7 +32,9 @@ const CURRENT_USER = "Vous";
 const TODAY = "2026-07-22";
 const STORAGE_KEY = "reseau-metier-store-v1";
 const emptyForm = { title: "", description: "", date: "", startTime: "10:00", duration: 60, organizers: "", tags: "" };
-const emptySquadForm = { name: "", description: "", logo: "", pageLink: "", planning: "", tags: "", coreTeam: "", participants: "" };
+const emptySquadForm = { name: "", description: "", logo: "", pageLink: "", recurrence: "monthly", meetingDuration: 60, tags: "", coreTeam: "", participants: "" };
+const RECURRENCE_MULTIPLIER = { weekly: 4, biweekly: 2, monthly: 1 };
+const RECURRENCE_LABEL = { weekly: "1x / semaine", biweekly: "1x / 2 semaines", monthly: "1x / mois" };
 
 function monthKey(dateStr) {
   const d = new Date(dateStr + "T00:00:00");
@@ -65,8 +67,8 @@ const FALLBACK_SEED = {
     { id: "e6", type: "talk", status: "ouvert", title: "ECC Talk — Sobriété numérique", description: "Comment réduire l'empreinte de nos systèmes d'information sans sacrifier la performance.", date: "2026-07-17", startTime: "10:00", duration: 60, organizers: ["Direction RSE"], linkId: 1, tags: ["RSE"], registrations: ["Aline Petit"] },
   ],
   squads: [
-    { id: "s1", name: "Squad Accessibilité", logo: "A11Y", description: "Diffuser les bonnes pratiques d'accessibilité numérique dans tous les projets.", pageLink: "https://intranet.example.com/squads/a11y", planning: "1 réunion par mois, 1h", tags: ["UX", "Frontend"], coreTeam: ["Hugo Simon", "Elise Moreau"], participants: ["Vous", "Julie Bernard", "Karim Haddad"] },
-    { id: "s2", name: "Squad Plateforme Data", logo: "DATA", description: "Mutualiser les outils et standards data entre les équipes produit.", pageLink: "https://intranet.example.com/squads/data", planning: "1 réunion toutes les 2 semaines, 45 min", tags: ["Data", "Cloud"], coreTeam: ["Marc Lefevre", "Thomas Nguyen", "Sofia Rossi"], participants: ["Aline Petit"] },
+    { id: "s1", name: "Squad Accessibilité", logo: "A11Y", description: "Diffuser les bonnes pratiques d'accessibilité numérique dans tous les projets.", pageLink: "https://intranet.example.com/squads/a11y", recurrence: "monthly", meetingDuration: 60, tags: ["UX", "Frontend"], coreTeam: ["Hugo Simon", "Elise Moreau"], participants: ["Vous", "Julie Bernard", "Karim Haddad"] },
+    { id: "s2", name: "Squad Plateforme Data", logo: "DATA", description: "Mutualiser les outils et standards data entre les équipes produit.", pageLink: "https://intranet.example.com/squads/data", recurrence: "biweekly", meetingDuration: 45, tags: ["Data", "Cloud"], coreTeam: ["Marc Lefevre", "Thomas Nguyen", "Sofia Rossi"], participants: ["Aline Petit"] },
   ],
 };
 
@@ -95,6 +97,8 @@ function App() {
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [squadForm, setSquadForm] = useState(emptySquadForm);
+  const [editingEventId, setEditingEventId] = useState(null);
+  const [editingSquadId, setEditingSquadId] = useState(null);
   const [selectedPerson, setSelectedPerson] = useState(null);
 
   const GH_CONFIG_KEY = "reseau-metier-github-config";
@@ -251,32 +255,72 @@ function App() {
   }
   function closeEvent(id) { setEvents(evts => evts.map(e => e.id === id ? { ...e, status: "ferme" } : e)); }
   function reopenEvent(id) { setEvents(evts => evts.map(e => e.id === id ? { ...e, status: "ouvert" } : e)); }
-  function openCreate(type) { setForm(emptyForm); setModal(type); }
+  function openCreate(type) { setForm(emptyForm); setEditingEventId(null); setModal(type); }
+  function openEditEvent(ev) {
+    setForm({
+      title: ev.title, description: ev.description, date: ev.date,
+      startTime: ev.startTime || "10:00", duration: ev.duration,
+      organizers: (ev.organizers || []).join(", "), tags: (ev.tags || []).join(", "),
+    });
+    setEditingEventId(ev.id);
+    setModal(ev.type);
+  }
 
   function submitEvent(e) {
     e.preventDefault();
     if (!form.title || !form.date) return;
-    const linkId = pickFreeLink(events, visioLinks, form.date);
-    const newEvent = {
-      id: `e${Date.now()}`, type: modal, status: "ouvert",
-      title: form.title, description: form.description, date: form.date,
-      startTime: form.startTime || "10:00", duration: Number(form.duration) || 60,
-      organizers: toTags(form.organizers), linkId, tags: toTags(form.tags), registrations: [],
-    };
-    setEvents(evts => [...evts, newEvent]);
+    if (editingEventId) {
+      setEvents(evts => evts.map(ev => ev.id !== editingEventId ? ev : {
+        ...ev, title: form.title, description: form.description, date: form.date,
+        startTime: form.startTime || "10:00", duration: Number(form.duration) || 60,
+        organizers: toTags(form.organizers), tags: toTags(form.tags),
+      }));
+    } else {
+      const linkId = pickFreeLink(events, visioLinks, form.date);
+      const newEvent = {
+        id: `e${Date.now()}`, type: modal, status: "ouvert",
+        title: form.title, description: form.description, date: form.date,
+        startTime: form.startTime || "10:00", duration: Number(form.duration) || 60,
+        organizers: toTags(form.organizers), linkId, tags: toTags(form.tags), registrations: [],
+      };
+      setEvents(evts => [...evts, newEvent]);
+    }
+    setEditingEventId(null);
     setModal(null);
+  }
+
+  function openEditSquad(s) {
+    setSquadForm({
+      name: s.name, description: s.description, logo: s.logo, pageLink: s.pageLink,
+      recurrence: s.recurrence || "monthly", meetingDuration: s.meetingDuration || 60,
+      tags: (s.tags || []).join(", "), coreTeam: (s.coreTeam || []).join(", "), participants: (s.participants || []).join(", "),
+    });
+    setEditingSquadId(s.id);
+    setModal("squad");
   }
 
   function submitSquad(e) {
     e.preventDefault();
     if (!squadForm.name) return;
-    const newSquad = {
-      id: `s${Date.now()}`, name: squadForm.name,
-      logo: (squadForm.logo || squadForm.name.slice(0, 4)).toUpperCase(),
-      description: squadForm.description, pageLink: squadForm.pageLink, planning: squadForm.planning,
-      tags: toTags(squadForm.tags), coreTeam: toTags(squadForm.coreTeam), participants: toTags(squadForm.participants),
-    };
-    setSquads(sq => [...sq, newSquad]);
+    if (editingSquadId) {
+      setSquads(sqs => sqs.map(s => s.id !== editingSquadId ? s : {
+        ...s, name: squadForm.name,
+        logo: (squadForm.logo || squadForm.name.slice(0, 4)).toUpperCase(),
+        description: squadForm.description, pageLink: squadForm.pageLink,
+        recurrence: squadForm.recurrence, meetingDuration: Number(squadForm.meetingDuration) || 60,
+        tags: toTags(squadForm.tags), coreTeam: toTags(squadForm.coreTeam), participants: toTags(squadForm.participants),
+      }));
+    } else {
+      const newSquad = {
+        id: `s${Date.now()}`, name: squadForm.name,
+        logo: (squadForm.logo || squadForm.name.slice(0, 4)).toUpperCase(),
+        description: squadForm.description, pageLink: squadForm.pageLink,
+        recurrence: squadForm.recurrence, meetingDuration: Number(squadForm.meetingDuration) || 60,
+        tags: toTags(squadForm.tags), coreTeam: toTags(squadForm.coreTeam), participants: toTags(squadForm.participants),
+      };
+      setSquads(sq => [...sq, newSquad]);
+    }
+    setEditingSquadId(null);
     setModal(null);
     setSquadForm(emptySquadForm);
   }
@@ -291,18 +335,31 @@ function App() {
 
   const synthesis = useMemo(() => {
     const rows = {};
-    people.forEach(p => { rows[p] = {}; });
+    const hours = {};
+    people.forEach(p => { rows[p] = {}; hours[p] = {}; });
     events.forEach(e => {
       const mk = monthKey(e.date);
-      e.registrations.forEach(p => { if (!rows[p]) rows[p] = {}; rows[p][mk] = (rows[p][mk] || 0) + 1; });
+      e.registrations.forEach(p => {
+        if (!rows[p]) rows[p] = {};
+        if (!hours[p]) hours[p] = {};
+        rows[p][mk] = (rows[p][mk] || 0) + 1;
+        hours[p][mk] = (hours[p][mk] || 0) + (e.duration || 0) / 60;
+      });
     });
     const currentMonth = monthKey(TODAY);
     squads.forEach(s => {
-      [...s.coreTeam, ...s.participants].forEach(p => { if (!rows[p]) rows[p] = {}; rows[p][currentMonth] = (rows[p][currentMonth] || 0) + 1; });
+      const mult = RECURRENCE_MULTIPLIER[s.recurrence] || 1;
+      const squadHours = mult * ((s.meetingDuration || 60) / 60);
+      [...s.coreTeam, ...s.participants].forEach(p => {
+        if (!rows[p]) rows[p] = {};
+        if (!hours[p]) hours[p] = {};
+        rows[p][currentMonth] = (rows[p][currentMonth] || 0) + mult;
+        hours[p][currentMonth] = (hours[p][currentMonth] || 0) + squadHours;
+      });
     });
     const months = Array.from(new Set(events.map(e => monthKey(e.date)).concat([currentMonth])))
       .sort((a, b) => new Date("1 " + a) - new Date("1 " + b));
-    return { rows, months };
+    return { rows, hours, months };
   }, [events, squads, people]);
 
   function personDetail(person) {
@@ -472,6 +529,9 @@ function App() {
                       Inscrits ({ev.registrations.length}) : {ev.registrations.length ? ev.registrations.join(", ") : "aucun pour l'instant"}
                     </div>
                     <div className="flex items-center gap-2 mt-3 flex-wrap">
+                      {(isAdmin || (ev.type === "lm" && ev.organizers.includes(CURRENT_USER))) && (
+                        <button onClick={() => openEditEvent(ev)} className={`text-xs px-3 py-1.5 rounded-lg border ${t.border}`}>Modifier</button>
+                      )}
                       {!closed && (
                         <button onClick={() => toggleRegister(ev.id)}
                           className={`text-xs font-medium px-3 py-1.5 rounded-lg border ${registered ? `${t.chipNeutral} border-transparent` : `text-white border-transparent ${TYPE[ev.type].btn}`}`}>
@@ -522,7 +582,7 @@ function App() {
                       <div className={`w-10 h-10 rounded-lg flex items-center justify-center text-xs font-semibold ${darkMode ? TYPE.squad.chipDark : TYPE.squad.chip}`}>{s.logo}</div>
                       <div>
                         <div className="font-medium">{s.name}</div>
-                        <div className={`text-xs ${t.faint}`}>{s.planning}</div>
+                        <div className={`text-xs ${t.faint}`}>{RECURRENCE_LABEL[s.recurrence] || "Récurrence non définie"}, {s.meetingDuration || 60} min</div>
                       </div>
                     </div>
                     <div className={`text-sm ${t.subtext}`}>{s.description}</div>
@@ -545,6 +605,9 @@ function App() {
                         className={`text-xs font-medium px-3 py-1.5 rounded-lg border ${isMember ? `${t.chipNeutral} border-transparent` : `border-violet-700 text-violet-700`}`}>
                         Rejoindre en core team
                       </button>
+                      {isAdmin && (
+                        <button onClick={() => openEditSquad(s)} className={`text-xs px-3 py-1.5 rounded-lg border ${t.border}`}>Modifier</button>
+                      )}
                     </div>
                     {isMember && (
                       <div className={`mt-2 text-xs ${t.faint}`}>
@@ -590,11 +653,14 @@ function App() {
                   <tr className={`text-left text-xs ${t.tableHead}`}>
                     <th className="px-3 py-2 font-medium">Personne</th>
                     {monthsToShow.map(m => <th key={m} className="px-3 py-2 font-medium capitalize font-mono">{m}</th>)}
+                    <th className="px-3 py-2 font-medium font-mono">Total heures</th>
                     <th className="px-3 py-2"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {people.map(p => (
+                  {people.map(p => {
+                    const totalHours = monthsToShow.reduce((sum, m) => sum + (synthesis.hours[p]?.[m] || 0), 0);
+                    return (
                     <tr key={p} className={`border-t ${t.rowBorder}`}>
                       <td className="px-3 py-2">{p}</td>
                       {monthsToShow.map(m => {
@@ -607,11 +673,13 @@ function App() {
                           </td>
                         );
                       })}
+                      <td className={`px-3 py-2 font-mono ${t.subtext}`}>{totalHours > 0 ? `${totalHours.toFixed(1)} h` : "—"}</td>
                       <td className="px-3 py-2 text-right">
                         <button onClick={() => setSelectedPerson(p)} className="text-xs text-violet-500">Détail <Chevron /></button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -681,8 +749,8 @@ function App() {
         <div style={{ minHeight: 400 }} className={`fixed inset-0 flex items-center justify-center z-10 ${t.modalOverlay}`}>
           <form onSubmit={submitEvent} className={`rounded-xl p-5 w-full max-w-md border ${t.panel}`}>
             <div className="flex items-center justify-between mb-3">
-              <div className="font-medium">Créer {modal === "lm" ? "un Learning Moment" : "un ECC Talk"}</div>
-              <button type="button" onClick={() => setModal(null)}>✕</button>
+              <div className="font-medium">{editingEventId ? "Modifier " : "Créer "}{modal === "lm" ? "un Learning Moment" : "un ECC Talk"}</div>
+              <button type="button" onClick={() => { setModal(null); setEditingEventId(null); }}>✕</button>
             </div>
             <div className="flex flex-col gap-3 text-sm">
               <input required placeholder="Titre / sujet" value={form.title} onChange={e => setForm(f => ({ ...f, title: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
@@ -694,9 +762,9 @@ function App() {
               </div>
               <input placeholder="Organisateur(s), séparés par des virgules" value={form.organizers} onChange={e => setForm(f => ({ ...f, organizers: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
               <input placeholder="Tags, séparés par des virgules (ex: UX, Cloud)" value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
-              <div className={`text-xs ${t.faint}`}>Un lien visio disponible sera assigné automatiquement parmi les {visioLinks.length} liens permanents.</div>
+              {!editingEventId && <div className={`text-xs ${t.faint}`}>Un lien visio disponible sera assigné automatiquement parmi les {visioLinks.length} liens permanents.</div>}
             </div>
-            <button type="submit" className={`mt-4 w-full text-white rounded-lg py-2 text-sm ${TYPE[modal].btn}`}>Créer</button>
+            <button type="submit" className={`mt-4 w-full text-white rounded-lg py-2 text-sm ${TYPE[modal].btn}`}>{editingEventId ? "Enregistrer les modifications" : "Créer"}</button>
           </form>
         </div>
       )}
@@ -744,20 +812,27 @@ function App() {
         <div style={{ minHeight: 400 }} className={`fixed inset-0 flex items-center justify-center z-10 ${t.modalOverlay}`}>
           <form onSubmit={submitSquad} className={`rounded-xl p-5 w-full max-w-md border ${t.panel}`}>
             <div className="flex items-center justify-between mb-3">
-              <div className="font-medium">Créer une squad</div>
-              <button type="button" onClick={() => setModal(null)}>✕</button>
+              <div className="font-medium">{editingSquadId ? "Modifier la squad" : "Créer une squad"}</div>
+              <button type="button" onClick={() => { setModal(null); setEditingSquadId(null); }}>✕</button>
             </div>
             <div className="flex flex-col gap-3 text-sm">
               <input required placeholder="Nom de la squad" value={squadForm.name} onChange={e => setSquadForm(f => ({ ...f, name: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
               <textarea placeholder="Description" value={squadForm.description} onChange={e => setSquadForm(f => ({ ...f, description: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} rows={3} />
               <input placeholder="Logo (initiales, ex: DATA)" value={squadForm.logo} onChange={e => setSquadForm(f => ({ ...f, logo: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
               <input placeholder="Lien de la page dédiée" value={squadForm.pageLink} onChange={e => setSquadForm(f => ({ ...f, pageLink: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
-              <input placeholder="Planning (ex: 1 réunion / mois, 1h)" value={squadForm.planning} onChange={e => setSquadForm(f => ({ ...f, planning: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
+              <div className="flex gap-3">
+                <select value={squadForm.recurrence} onChange={e => setSquadForm(f => ({ ...f, recurrence: e.target.value }))} className={`border rounded-lg px-3 py-2 flex-1 ${t.input}`}>
+                  <option value="weekly">1x / semaine</option>
+                  <option value="biweekly">1x / 2 semaines</option>
+                  <option value="monthly">1x / mois</option>
+                </select>
+                <input type="number" min={15} step={15} placeholder="Durée (min)" value={squadForm.meetingDuration} onChange={e => setSquadForm(f => ({ ...f, meetingDuration: e.target.value }))} className={`border rounded-lg px-3 py-2 w-32 ${t.input}`} />
+              </div>
               <input placeholder="Tags, séparés par des virgules" value={squadForm.tags} onChange={e => setSquadForm(f => ({ ...f, tags: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
               <input placeholder="Core team, séparés par des virgules" value={squadForm.coreTeam} onChange={e => setSquadForm(f => ({ ...f, coreTeam: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
               <input placeholder="Participants, séparés par des virgules" value={squadForm.participants} onChange={e => setSquadForm(f => ({ ...f, participants: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
             </div>
-            <button type="submit" className={`mt-4 w-full text-white rounded-lg py-2 text-sm ${TYPE.squad.btn}`}>Créer</button>
+            <button type="submit" className={`mt-4 w-full text-white rounded-lg py-2 text-sm ${TYPE.squad.btn}`}>{editingSquadId ? "Enregistrer les modifications" : "Créer"}</button>
           </form>
         </div>
       )}
