@@ -91,6 +91,7 @@ function App() {
   const [statusFilter, setStatusFilter] = useState("ouvert");
   const [tagFilter, setTagFilter] = useState(null);
   const [monthFilter, setMonthFilter] = useState("tous");
+  const [showReal, setShowReal] = useState(false); // false = plafonné à 2 (par défaut), true = valeurs réelles
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [squadForm, setSquadForm] = useState(emptySquadForm);
@@ -98,6 +99,20 @@ function App() {
 
   const GH_CONFIG_KEY = "reseau-metier-github-config";
   useEffect(() => {
+    // Lien de configuration partagé : #config=<json encodé>, prioritaire sur le localStorage existant.
+    if (window.location.hash.startsWith("#config=")) {
+      try {
+        const fromLink = JSON.parse(decodeURIComponent(window.location.hash.slice("#config=".length)));
+        localStorage.setItem(GH_CONFIG_KEY, JSON.stringify(fromLink));
+        setGithubConfig(fromLink);
+        setConfigForm(fromLink);
+      } catch (err) {
+        console.error("Lien de configuration invalide", err);
+      }
+      // On retire immédiatement le token de la barre d'adresse / de l'historique du navigateur.
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+      return;
+    }
     const saved = localStorage.getItem(GH_CONFIG_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
@@ -105,6 +120,18 @@ function App() {
       setConfigForm(parsed);
     }
   }, []);
+
+  const shareLink = useMemo(() => {
+    if (!configForm.owner || !configForm.repo || !configForm.token) return "";
+    const encoded = encodeURIComponent(JSON.stringify(configForm));
+    return `${window.location.origin}${window.location.pathname}#config=${encoded}`;
+  }, [configForm]);
+
+  function copyShareLink() {
+    if (!shareLink) return;
+    navigator.clipboard.writeText(shareLink);
+    setGhStatus({ type: "success", msg: "Lien copié dans le presse-papiers." });
+  }
 
   function saveGithubConfig(e) {
     e.preventDefault();
@@ -254,11 +281,11 @@ function App() {
     setSquadForm(emptySquadForm);
   }
 
-  function joinSquad(squadId) {
+  function joinSquad(squadId, group) {
     setSquads(sqs => sqs.map(s => {
       if (s.id !== squadId) return s;
       if (s.coreTeam.includes(CURRENT_USER) || s.participants.includes(CURRENT_USER)) return s;
-      return { ...s, participants: [...s.participants, CURRENT_USER] };
+      return group === "core" ? { ...s, coreTeam: [...s.coreTeam, CURRENT_USER] } : { ...s, participants: [...s.participants, CURRENT_USER] };
     }));
   }
 
@@ -282,7 +309,14 @@ function App() {
     const myEvents = events.filter(e => e.registrations.includes(person)).slice().sort((a, b) => new Date(a.date) - new Date(b.date));
     const mySquads = squads.filter(s => s.coreTeam.includes(person) || s.participants.includes(person))
       .map(s => ({ ...s, role: s.coreTeam.includes(person) ? "Core team" : "Participant" }));
-    return { myEvents, mySquads };
+    const byMonth = {};
+    myEvents.forEach(e => {
+      const mk = monthKey(e.date);
+      if (!byMonth[mk]) byMonth[mk] = [];
+      byMonth[mk].push(e);
+    });
+    const eventsByMonth = Object.entries(byMonth).sort((a, b) => new Date("1 " + a[0]) - new Date("1 " + b[0]));
+    return { myEvents, mySquads, eventsByMonth };
   }
 
   function exportCSV() {
@@ -502,10 +536,21 @@ function App() {
                       <div><div className={`mb-1 ${t.faint}`}>Core team ({s.coreTeam.length})</div><div className={t.subtext}>{s.coreTeam.join(", ") || "—"}</div></div>
                       <div><div className={`mb-1 ${t.faint}`}>Participants ({s.participants.length})</div><div className={t.subtext}>{s.participants.join(", ") || "—"}</div></div>
                     </div>
-                    <button disabled={isMember} onClick={() => joinSquad(s.id)}
-                      className={`mt-3 text-xs font-medium px-3 py-1.5 rounded-lg border ${isMember ? `${t.chipNeutral} border-transparent` : `text-white border-transparent ${TYPE.squad.btn}`}`}>
-                      {isMember ? "Déjà membre" : "Rejoindre comme participant"}
-                    </button>
+                    <div className="flex flex-wrap gap-2 mt-3">
+                      <button disabled={isMember} onClick={() => joinSquad(s.id, "participant")}
+                        className={`text-xs font-medium px-3 py-1.5 rounded-lg border ${isMember ? `${t.chipNeutral} border-transparent` : `text-white border-transparent ${TYPE.squad.btn}`}`}>
+                        Rejoindre comme participant
+                      </button>
+                      <button disabled={isMember} onClick={() => joinSquad(s.id, "core")}
+                        className={`text-xs font-medium px-3 py-1.5 rounded-lg border ${isMember ? `${t.chipNeutral} border-transparent` : `border-violet-700 text-violet-700`}`}>
+                        Rejoindre en core team
+                      </button>
+                    </div>
+                    {isMember && (
+                      <div className={`mt-2 text-xs ${t.faint}`}>
+                        Vous êtes déjà membre ({s.coreTeam.includes(CURRENT_USER) ? "core team" : "participant"}).
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -518,15 +563,21 @@ function App() {
           <div className="mt-5">
             <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div className={`text-sm ${t.subtext}`}>Total LM + Talk + Squad par personne (règle : max 2 / mois)</div>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <select value={monthFilter} onChange={e => setMonthFilter(e.target.value)} className={`text-sm border rounded-lg px-2 py-1.5 ${t.input}`}>
                   <option value="tous">Tous les mois</option>
                   {synthesis.months.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
+                <button onClick={() => setShowReal(s => !s)} className={`text-sm px-3 py-1.5 rounded-lg border ${t.border}`}>
+                  {showReal ? "Plafonner l'affichage à 2" : "Afficher les valeurs réelles"}
+                </button>
                 <button onClick={exportCSV} className={`text-sm px-3 py-1.5 rounded-lg border ${t.border}`}>Export CSV</button>
                 <button onClick={exportJSON} className={`text-sm px-3 py-1.5 rounded-lg border ${t.border}`}>Export data.json</button>
                 <button onClick={pushToGithub} className={`text-sm text-white px-3 py-1.5 rounded-lg ${TYPE.squad.btn}`}>Publier sur GitHub</button>
               </div>
+            </div>
+            <div className={`mb-4 text-xs ${t.faint}`}>
+              {showReal ? "Affichage des totaux réels." : "Affichage plafonné à 2 par défaut (la valeur réelle apparaît au survol si elle dépasse 2)."}
             </div>
             {ghStatus && (
               <div className={`mb-4 text-xs rounded-lg px-3 py-2 border ${ghStatus.type === "error" ? t.warn : ghStatus.type === "success" ? "text-emerald-700 bg-emerald-50 border-emerald-200" : t.chipNeutral}`}>
@@ -549,7 +600,12 @@ function App() {
                       {monthsToShow.map(m => {
                         const val = synthesis.rows[p]?.[m] || 0;
                         const over = val > 2;
-                        return <td key={m} className={`px-3 py-2 font-mono ${over ? `${t.over} font-medium` : t.subtext}`}>{val || "—"}</td>;
+                        const displayVal = showReal ? val : Math.min(val, 2);
+                        return (
+                          <td key={m} title={over ? `Valeur réelle : ${val}` : undefined} className={`px-3 py-2 font-mono ${over ? `${t.over} font-medium` : t.subtext}`}>
+                            {val === 0 ? "—" : displayVal}{over && !showReal ? "+" : ""}
+                          </td>
+                        );
                       })}
                       <td className="px-3 py-2 text-right">
                         <button onClick={() => setSelectedPerson(p)} className="text-xs text-violet-500">Détail <Chevron /></button>
@@ -574,15 +630,22 @@ function App() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <div className={`text-xs font-medium mb-2 ${t.faint}`}>Learning Moments & Talks</div>
-                <div className="flex flex-col gap-2">
-                  {detail.myEvents.map(e => (
-                    <div key={e.id} className={`border rounded-lg p-3 text-sm ${t.panel}`}>
-                      <div className="flex items-center gap-2 mb-1 flex-wrap">
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${darkMode ? TYPE[e.type].chipDark : TYPE[e.type].chip}`}>{TYPE[e.type].short}</span>
-                        <span className={`text-xs ${t.faint}`}>{formatDate(e.date)} · {e.startTime}</span>
-                        {e.status === "ferme" && <span className={`text-xs px-2 py-0.5 rounded-full ${t.chipNeutral}`}>Historique</span>}
+                <div className="flex flex-col gap-4">
+                  {detail.eventsByMonth.map(([mk, evts]) => (
+                    <div key={mk}>
+                      <div className="text-xs font-semibold capitalize mb-2">{mk} <span className={`font-normal ${t.faint}`}>({evts.length})</span></div>
+                      <div className="flex flex-col gap-2">
+                        {evts.map(e => (
+                          <div key={e.id} className={`border rounded-lg p-3 text-sm ${t.panel}`}>
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${darkMode ? TYPE[e.type].chipDark : TYPE[e.type].chip}`}>{TYPE[e.type].short}</span>
+                              <span className={`text-xs ${t.faint}`}>{formatDate(e.date)} · {e.startTime}</span>
+                              {e.status === "ferme" && <span className={`text-xs px-2 py-0.5 rounded-full ${t.chipNeutral}`}>Historique</span>}
+                            </div>
+                            <div>{e.title}</div>
+                          </div>
+                        ))}
                       </div>
-                      <div>{e.title}</div>
                     </div>
                   ))}
                   {detail.myEvents.length === 0 && <div className={`text-sm ${t.faint}`}>Aucune inscription.</div>}
@@ -659,6 +722,17 @@ function App() {
               <div className={`text-xs rounded-lg px-3 py-2 border ${t.warn}`}>
                 Ce token est stocké uniquement dans le localStorage de <strong>ce navigateur</strong> et n'est envoyé qu'à api.github.com pour publier les données. Créez un token fine-grained limité à ce seul dépôt, avec uniquement la permission "Contents: Read and write" — ne réutilisez jamais un token à portée large ici, et ne l'entrez pas sur un poste partagé.
               </div>
+
+              {shareLink && (
+                <div className={`border rounded-lg p-3 ${t.panel} ${t.border}`}>
+                  <div className="text-xs font-medium mb-1">Lien de partage (config + token inclus)</div>
+                  <input readOnly value={shareLink} onFocus={e => e.target.select()} className={`border rounded-lg px-3 py-2 text-xs w-full mb-2 ${t.input}`} />
+                  <button type="button" onClick={copyShareLink} className={`text-xs px-3 py-1.5 rounded-lg border ${t.border}`}>Copier le lien</button>
+                  <div className={`text-xs rounded-lg px-3 py-2 border mt-2 ${t.warn}`}>
+                    Ce lien contient votre token en clair : quiconque l'ouvre obtient un accès en écriture au dépôt configuré. Traitez-le comme un mot de passe — ne l'envoyez jamais par un canal non chiffré ou public (pas de post public, pas de ticket visible par tous). Le token n'est pas envoyé au serveur (il reste dans le fragment #, après le "#", qui n'est jamais transmis en HTTP) mais il reste visible dans l'historique de navigation et dans tout outil de partage de lien (chat, email) — à révoquer côté GitHub si le lien a pu fuiter.
+                  </div>
+                </div>
+              )}
             </div>
             <button type="submit" className={`mt-4 w-full text-white rounded-lg py-2 text-sm ${TYPE.squad.btn}`}>Enregistrer</button>
           </form>
