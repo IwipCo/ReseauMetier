@@ -76,6 +76,9 @@ const Chevron = () => <span aria-hidden="true">›</span>;
 function App() {
   const [loading, setLoading] = useState(true);
   const [usingFallback, setUsingFallback] = useState(false);
+  const [githubConfig, setGithubConfig] = useState({ owner: "", repo: "", branch: "main", path: "data.json", token: "" });
+  const [configForm, setConfigForm] = useState({ owner: "", repo: "", branch: "main", path: "data.json", token: "" });
+  const [ghStatus, setGhStatus] = useState(null); // { type: 'loading'|'success'|'error', msg }
   const [people, setPeople] = useState([]);
   const [visioLinks, setVisioLinks] = useState([]);
   const [events, setEvents] = useState([]);
@@ -92,6 +95,64 @@ function App() {
   const [form, setForm] = useState(emptyForm);
   const [squadForm, setSquadForm] = useState(emptySquadForm);
   const [selectedPerson, setSelectedPerson] = useState(null);
+
+  const GH_CONFIG_KEY = "reseau-metier-github-config";
+  useEffect(() => {
+    const saved = localStorage.getItem(GH_CONFIG_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      setGithubConfig(parsed);
+      setConfigForm(parsed);
+    }
+  }, []);
+
+  function saveGithubConfig(e) {
+    e.preventDefault();
+    localStorage.setItem(GH_CONFIG_KEY, JSON.stringify(configForm));
+    setGithubConfig(configForm);
+    setModal(null);
+    setGhStatus(null);
+  }
+
+  async function pushToGithub() {
+    const { owner, repo, branch, path, token } = githubConfig;
+    if (!owner || !repo || !token) {
+      setGhStatus({ type: "error", msg: "Configuration GitHub incomplète (propriétaire, dépôt et token requis)." });
+      return;
+    }
+    setGhStatus({ type: "loading", msg: "Publication en cours…" });
+    try {
+      const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${path}`;
+      let sha;
+      const getRes = await fetch(`${apiUrl}?ref=${branch}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+      });
+      if (getRes.ok) {
+        const getData = await getRes.json();
+        sha = getData.sha;
+      } else if (getRes.status !== 404) {
+        const errData = await getRes.json().catch(() => ({}));
+        throw new Error(errData.message || `Lecture du fichier impossible (HTTP ${getRes.status})`);
+      }
+      const payload = { people, visioLinks, events, squads };
+      const content = btoa(unescape(encodeURIComponent(JSON.stringify(payload, null, 2))));
+      const putRes = await fetch(apiUrl, {
+        method: "PUT",
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+        body: JSON.stringify({
+          message: `Mise à jour des données Réseau Métier — ${new Date().toISOString()}`,
+          content, sha, branch,
+        }),
+      });
+      if (!putRes.ok) {
+        const errData = await putRes.json().catch(() => ({}));
+        throw new Error(errData.message || `Échec de la publication (HTTP ${putRes.status})`);
+      }
+      setGhStatus({ type: "success", msg: "Données publiées sur GitHub. La page se mettra à jour pour tout le monde après le redéploiement de Pages (quelques secondes à ~1 min)." });
+    } catch (err) {
+      setGhStatus({ type: "error", msg: "Échec : " + err.message });
+    }
+  }
 
   /* ---------- Chargement des données : localStorage (édité) sinon data.json (source) ---------- */
   useEffect(() => {
@@ -288,6 +349,12 @@ function App() {
               className={`text-sm px-3 py-1.5 rounded-full border ${isAdmin ? t.toggleBtn : t.toggleBtnOff}`}>
               {isAdmin ? "Vue admin activée" : "Activer la vue admin"}
             </button>
+            {isAdmin && (
+              <button onClick={() => { setConfigForm(githubConfig); setModal("config"); }}
+                className={`text-sm px-3 py-1.5 rounded-full border ${t.toggleBtnOff}`}>
+                ⚙ Configuration
+              </button>
+            )}
           </div>
         </div>
 
@@ -458,8 +525,14 @@ function App() {
                 </select>
                 <button onClick={exportCSV} className={`text-sm px-3 py-1.5 rounded-lg border ${t.border}`}>Export CSV</button>
                 <button onClick={exportJSON} className={`text-sm px-3 py-1.5 rounded-lg border ${t.border}`}>Export data.json</button>
+                <button onClick={pushToGithub} className={`text-sm text-white px-3 py-1.5 rounded-lg ${TYPE.squad.btn}`}>Publier sur GitHub</button>
               </div>
             </div>
+            {ghStatus && (
+              <div className={`mb-4 text-xs rounded-lg px-3 py-2 border ${ghStatus.type === "error" ? t.warn : ghStatus.type === "success" ? "text-emerald-700 bg-emerald-50 border-emerald-200" : t.chipNeutral}`}>
+                {ghStatus.msg}
+              </div>
+            )}
             <div className={`overflow-x-auto border rounded-xl ${t.border}`}>
               <table className="w-full text-sm">
                 <thead>
@@ -561,6 +634,33 @@ function App() {
               <div className={`text-xs ${t.faint}`}>Un lien visio disponible sera assigné automatiquement parmi les {visioLinks.length} liens permanents.</div>
             </div>
             <button type="submit" className={`mt-4 w-full text-white rounded-lg py-2 text-sm ${TYPE[modal].btn}`}>Créer</button>
+          </form>
+        </div>
+      )}
+
+      {/* ---------- Modale Configuration GitHub ---------- */}
+      {modal === "config" && (
+        <div style={{ minHeight: 400 }} className={`fixed inset-0 flex items-center justify-center z-10 ${t.modalOverlay}`}>
+          <form onSubmit={saveGithubConfig} className={`rounded-xl p-5 w-full max-w-md border ${t.panel}`}>
+            <div className="flex items-center justify-between mb-3">
+              <div className="font-medium">Configuration GitHub</div>
+              <button type="button" onClick={() => setModal(null)}>✕</button>
+            </div>
+            <div className="flex flex-col gap-3 text-sm">
+              <div className="flex gap-3">
+                <input required placeholder="Propriétaire (user/org)" value={configForm.owner} onChange={e => setConfigForm(f => ({ ...f, owner: e.target.value }))} className={`border rounded-lg px-3 py-2 flex-1 ${t.input}`} />
+                <input required placeholder="Dépôt" value={configForm.repo} onChange={e => setConfigForm(f => ({ ...f, repo: e.target.value }))} className={`border rounded-lg px-3 py-2 flex-1 ${t.input}`} />
+              </div>
+              <div className="flex gap-3">
+                <input placeholder="Branche (main)" value={configForm.branch} onChange={e => setConfigForm(f => ({ ...f, branch: e.target.value }))} className={`border rounded-lg px-3 py-2 flex-1 ${t.input}`} />
+                <input placeholder="Chemin (data.json)" value={configForm.path} onChange={e => setConfigForm(f => ({ ...f, path: e.target.value }))} className={`border rounded-lg px-3 py-2 flex-1 ${t.input}`} />
+              </div>
+              <input required type="password" placeholder="Token GitHub (fine-grained, permission Contents: Read and write)" value={configForm.token} onChange={e => setConfigForm(f => ({ ...f, token: e.target.value }))} className={`border rounded-lg px-3 py-2 ${t.input}`} />
+              <div className={`text-xs rounded-lg px-3 py-2 border ${t.warn}`}>
+                Ce token est stocké uniquement dans le localStorage de <strong>ce navigateur</strong> et n'est envoyé qu'à api.github.com pour publier les données. Créez un token fine-grained limité à ce seul dépôt, avec uniquement la permission "Contents: Read and write" — ne réutilisez jamais un token à portée large ici, et ne l'entrez pas sur un poste partagé.
+              </div>
+            </div>
+            <button type="submit" className={`mt-4 w-full text-white rounded-lg py-2 text-sm ${TYPE.squad.btn}`}>Enregistrer</button>
           </form>
         </div>
       )}
